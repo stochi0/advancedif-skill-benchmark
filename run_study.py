@@ -167,6 +167,7 @@ def run_command(cmd: list[str], cwd: Path, log_path: Path) -> None:
 def write_eval_config(
     *,
     path: Path,
+    output_base: Path,
     env_id: str,
     model: str,
     judge_model: str,
@@ -177,6 +178,9 @@ def write_eval_config(
     max_concurrent: int,
     system_prompt_override: str | None = None,
 ) -> None:
+    # TOML-driven `prime eval run` does not merge CLI `--output-dir`; set `output_dir`
+    # here so results land under `output_base/evals/<env>--<model>/` as downstream
+    # steps expect.
     lines = [
         f"model = {json_string(model)}",
         'api_base_url = "https://api.pinference.ai/api/v1"',
@@ -185,6 +189,7 @@ def write_eval_config(
         "rollouts_per_example = 1",
         f"max_concurrent = {max_concurrent}",
         "save_results = true",
+        f"output_dir = {json_string(str(output_base.resolve()))}",
         'env_dir_path = "."',
         "",
         "[[eval]]",
@@ -787,6 +792,7 @@ def main() -> None:
     rlm_config_path = configs_dir / "rlm_main_eval.toml"
     write_eval_config(
         path=iter_config_path,
+        output_base=study_dir,
         env_id="advancedif_iter_skill",
         model=args.model,
         judge_model=args.judge_model,
@@ -798,6 +804,7 @@ def main() -> None:
     )
     write_eval_config(
         path=rlm_config_path,
+        output_base=study_dir,
         env_id="advancedif_rlm_skill",
         model=args.model,
         judge_model=args.judge_model,
@@ -911,6 +918,7 @@ def main() -> None:
         gepa_eval_config_path = configs_dir / "gepa_main_eval.toml"
         write_eval_config(
             path=gepa_eval_config_path,
+            output_base=study_dir,
             env_id="advancedif_iter_skill",
             model=args.model,
             judge_model=args.judge_model,
