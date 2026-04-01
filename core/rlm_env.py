@@ -48,6 +48,7 @@ class RLMSkillEnv(RLMEnv):
         root_prompt_verbosity = kwargs.pop("root_prompt_verbosity", "medium")
         super().__init__(
             dataset=dataset,
+            eval_dataset=dataset,
             rubric=rubric,
             parser=vf.Parser(),
             env_id="advancedif_rlm_skill",

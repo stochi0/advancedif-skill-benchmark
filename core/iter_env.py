@@ -36,6 +36,7 @@ class IterSkillEnv(vf.StatefulToolEnv):
 
         super().__init__(
             dataset=dataset,
+            eval_dataset=dataset,
             rubric=rubric,
             parser=vf.Parser(),
             system_prompt=system_prompt,
