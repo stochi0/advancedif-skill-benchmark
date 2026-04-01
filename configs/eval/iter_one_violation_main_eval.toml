@@ -3,7 +3,7 @@ api_base_url = "https://api.pinference.ai/api/v1"
 api_key_var = "PRIME_API_KEY"
 num_examples = 90
 rollouts_per_example = 1
-max_concurrent = 16
+max_concurrent = 48
 save_results = true
 env_dir_path = "."
 

@@ -26,6 +26,18 @@ DEFAULT_GEPA_NUM_TRAIN = 45
 DEFAULT_GEPA_NUM_VAL = 45
 DEFAULT_SEED = 7
 
+# Prime eval / GEPA throughput (lower if you hit API rate limits or local OOM).
+DEFAULT_EVAL_MAX_CONCURRENT_ITER = 48
+DEFAULT_EVAL_MAX_CONCURRENT_RLM = 32
+DEFAULT_GEPA_MAX_CONCURRENT = 32
+
+# RLM sandbox resources per rollout (prime_sandboxes / Docker).
+RLM_SANDBOX_CPU_CORES = 8
+RLM_SANDBOX_MEMORY_GB = 16
+RLM_SANDBOX_DISK_GB = 40
+RLM_SANDBOX_TIMEOUT_MINUTES = 60
+RLM_CODE_EXECUTION_TIMEOUT_SEC = 300
+
 
 @dataclass(frozen=True)
 class EvalRunSummary:
@@ -196,12 +208,12 @@ def write_eval_config(
                 'repl_language = "python"',
                 f"sub_model = {json_string(model)}",
                 'sandbox_docker_image = "python:3.11-slim"',
-                "sandbox_cpu_cores = 4",
-                "sandbox_memory_gb = 8",
-                "sandbox_disk_size_gb = 20",
+                f"sandbox_cpu_cores = {RLM_SANDBOX_CPU_CORES}",
+                f"sandbox_memory_gb = {RLM_SANDBOX_MEMORY_GB}",
+                f"sandbox_disk_size_gb = {RLM_SANDBOX_DISK_GB}",
                 "sandbox_gpu_count = 0",
-                "sandbox_timeout_minutes = 45",
-                "code_execution_timeout = 180",
+                f"sandbox_timeout_minutes = {RLM_SANDBOX_TIMEOUT_MINUTES}",
+                f"code_execution_timeout = {RLM_CODE_EXECUTION_TIMEOUT_SEC}",
             ]
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -219,6 +231,7 @@ def write_gepa_config(
     num_val: int,
     seed: int,
     run_dir: Path,
+    max_concurrent: int = DEFAULT_GEPA_MAX_CONCURRENT,
 ) -> None:
     lines = [
         f"model = {json_string(model)}",
@@ -249,7 +262,7 @@ def write_gepa_config(
         'state_columns = ["criterion_vector", "judge_history", "first_submission_score"]',
         "",
         "[execution]",
-        "max_concurrent = 8",
+        f"max_concurrent = {max_concurrent}",
         f"seed = {seed}",
         "sampling_args = { temperature = 0.2 }",
     ]
@@ -781,7 +794,7 @@ def main() -> None:
         num_examples=args.num_examples,
         max_turns=args.max_turns,
         benchmark_split=args.benchmark_split,
-        max_concurrent=16,
+        max_concurrent=DEFAULT_EVAL_MAX_CONCURRENT_ITER,
     )
     write_eval_config(
         path=rlm_config_path,
@@ -792,7 +805,7 @@ def main() -> None:
         num_examples=args.num_examples,
         max_turns=args.max_turns,
         benchmark_split=args.benchmark_split,
-        max_concurrent=8,
+        max_concurrent=DEFAULT_EVAL_MAX_CONCURRENT_RLM,
     )
 
     run_command(
@@ -905,7 +918,7 @@ def main() -> None:
             num_examples=args.num_examples,
             max_turns=args.max_turns,
             benchmark_split=args.benchmark_split,
-            max_concurrent=16,
+            max_concurrent=DEFAULT_EVAL_MAX_CONCURRENT_ITER,
             system_prompt_override=gepa_run_summary.best_prompt,
         )
         run_command(
