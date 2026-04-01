@@ -14,7 +14,7 @@ name = "stub-do-not-run-yet"
 
 [orchestrator]
 batch_size = 128
-rollouts_per_example = 8
+rollouts_per_example = 1
 
 [[orchestrator.env]]
 id = "advancedif_iter_skill"

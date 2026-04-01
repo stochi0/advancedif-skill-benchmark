@@ -1,7 +1,7 @@
 model = "openai/gpt-4.1-mini"
 api_base_url = "https://api.pinference.ai/api/v1"
 api_key_var = "PRIME_API_KEY"
-num_examples = 90
+num_examples = 8
 rollouts_per_example = 1
 max_concurrent = 32
 save_results = true

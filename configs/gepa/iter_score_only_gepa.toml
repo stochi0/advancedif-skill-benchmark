@@ -10,8 +10,8 @@ env_args = { benchmark_split = "dev_gepa", feedback_mode = "score_only", allow_s
 
 [gepa]
 max_calls = 120
-num_train = 45
-num_val = 45
+num_train = 4
+num_val = 4
 minibatch_size = 3
 state_columns = ["criterion_vector", "judge_history", "first_submission_score"]
 
