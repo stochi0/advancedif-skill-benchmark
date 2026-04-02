@@ -12,18 +12,19 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from core.dotenv_bootstrap import load_project_dotenv
 from core.skill_artifact import skill_word_count
 
 DEFAULT_MODEL = "openai/gpt-4.1-mini"
-DEFAULT_JUDGE_MODEL = "z-ai/glm-4.7"
+DEFAULT_JUDGE_MODEL = "openai/gpt-4.1-mini"
 DEFAULT_FEEDBACK_MODE = "score_only"
 DEFAULT_MAX_TURNS = 6
 DEFAULT_BENCHMARK_SPLIT = "main_eval"
-DEFAULT_NUM_EXAMPLES = 8
+DEFAULT_NUM_EXAMPLES = 1
 DEFAULT_SEQUENCE_ENV = "auto"
-DEFAULT_GEPA_MAX_CALLS = 120
-DEFAULT_GEPA_NUM_TRAIN = 4
-DEFAULT_GEPA_NUM_VAL = 4
+DEFAULT_GEPA_MAX_CALLS = 1
+DEFAULT_GEPA_NUM_TRAIN = 1
+DEFAULT_GEPA_NUM_VAL = 1
 DEFAULT_SEED = 7
 
 # Prime eval / GEPA throughput (lower if you hit API rate limits or local OOM).
@@ -32,9 +33,9 @@ DEFAULT_EVAL_MAX_CONCURRENT_RLM = 32
 DEFAULT_GEPA_MAX_CONCURRENT = 32
 
 # RLM sandbox resources per rollout (prime_sandboxes / Docker).
-RLM_SANDBOX_CPU_CORES = 8
-RLM_SANDBOX_MEMORY_GB = 16
-RLM_SANDBOX_DISK_GB = 40
+RLM_SANDBOX_CPU_CORES = 2
+RLM_SANDBOX_MEMORY_GB = 4
+RLM_SANDBOX_DISK_GB = 20
 RLM_SANDBOX_TIMEOUT_MINUTES = 60
 RLM_CODE_EXECUTION_TIMEOUT_SEC = 300
 
@@ -200,6 +201,9 @@ def write_eval_config(
         "",
         "[eval.env_args]",
         f"benchmark_split = {json_string(benchmark_split)}",
+        # Caps env dataset size; without this, main_eval still builds 90 rows (30×3 regimes)
+        # and HF `.map` preprocesses all of them even when num_examples is 1.
+        f"max_examples = {num_examples}",
         f"feedback_mode = {json_string(feedback_mode)}",
         "allow_skill_updates = true",
         f"judge_model = {json_string(judge_model)}",
@@ -263,7 +267,7 @@ def write_gepa_config(
         f"max_calls = {max_calls}",
         f"num_train = {num_train}",
         f"num_val = {num_val}",
-        "minibatch_size = 3",
+        f"minibatch_size = {max(1, min(3, num_train))}",
         'state_columns = ["criterion_vector", "judge_history", "first_submission_score"]',
         "",
         "[execution]",
@@ -764,7 +768,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-turns", type=int, default=DEFAULT_MAX_TURNS)
     parser.add_argument("--benchmark-split", default=DEFAULT_BENCHMARK_SPLIT)
-    parser.add_argument("--num-examples", type=int, default=DEFAULT_NUM_EXAMPLES)
+    parser.add_argument(
+        "--num-examples",
+        type=int,
+        default=DEFAULT_NUM_EXAMPLES,
+        help="Prime eval rollouts per env and GEPA follow-up eval size (default: 1).",
+    )
+    parser.add_argument(
+        "--sequence-max-examples",
+        type=int,
+        default=1,
+        help="Cap carryover tasks per sequence and transfer probe rows (default: 1).",
+    )
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument(
         "--sequence-env",
@@ -777,6 +792,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    load_project_dotenv()
     args = parse_args()
     package_root = Path(__file__).resolve().parent
     study_root = Path(args.study_root)
@@ -823,6 +839,9 @@ def main() -> None:
             "eval",
             "run",
             str(iter_config_path),
+            # Prime CLI builds job_id / preflight from CLI `--model`, not from TOML alone.
+            "--model",
+            args.model,
             "--output-dir",
             str(study_dir),
         ],
@@ -837,6 +856,8 @@ def main() -> None:
             "eval",
             "run",
             str(rlm_config_path),
+            "--model",
+            args.model,
             "--output-dir",
             str(study_dir),
         ],
@@ -878,6 +899,8 @@ def main() -> None:
             str(args.max_turns),
             "--benchmark-seed",
             str(args.seed),
+            "--max-examples",
+            str(args.sequence_max_examples),
             "--output-dir",
             str(sequence_dir),
         ],
@@ -937,6 +960,8 @@ def main() -> None:
                 "eval",
                 "run",
                 str(gepa_eval_config_path),
+                "--model",
+                args.model,
                 "--output-dir",
                 str(study_dir),
             ],

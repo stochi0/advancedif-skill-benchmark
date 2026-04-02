@@ -9,9 +9,9 @@ from core.dataset import AdvancedIFExample, build_rollout_input
 from core.iter_env import IterSkillEnv
 from core.rlm_env import RLMSkillEnv
 from core.skill_artifact import EMPTY_SKILL_TEMPLATE
-from sequence_runner import run_sequence_experiment
+from sequence_runner import _dumps_rollout_line, run_sequence_experiment
 from verifiers.clients.client import Client
-from verifiers.types import Response, ResponseMessage, ToolCall
+from verifiers.types import Response, ResponseMessage, SystemMessage, ToolCall, UserMessage
 
 
 def make_dataset_row() -> dict[str, str]:
@@ -255,8 +255,21 @@ async def test_sequence_runner_writes_outputs(tmp_path: Path, monkeypatch):
         env_id="advancedif_iter_skill",
         model="model-a",
         output_dir=tmp_path / "sequence_run",
+        max_examples=None,
     )
 
     metadata = json.loads(Path(result["metadata_path"]).read_text(encoding="utf-8"))
     assert metadata["record_count"] == 4
     assert Path(result["results_path"]).is_file()
+
+
+def test_dumps_rollout_line_serializes_verifiers_messages():
+    row = {
+        "prompt": [SystemMessage(content="sys"), UserMessage(content="hi")],
+        "reward": 0.5,
+    }
+    line = _dumps_rollout_line(row)
+    out = json.loads(line)
+    assert out["reward"] == 0.5
+    assert out["prompt"][0] == {"role": "system", "content": "sys"}
+    assert out["prompt"][1] == {"role": "user", "content": "hi"}

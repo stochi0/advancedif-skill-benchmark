@@ -8,10 +8,29 @@ from pathlib import Path
 from typing import Any
 
 import verifiers as vf
+from pydantic import BaseModel
 from core.config import PINFERENCE_API_BASE_URL, PINFERENCE_API_KEY_VAR, EnvironmentConfig
 from core.constants import DEFAULT_JUDGE_MODEL, DEFAULT_SAMPLING_ARGS, STATE_COLUMNS
-from core.dataset import build_benchmark_splits, build_rollout_input
+from core.dataset import AdvancedIFExample, BenchmarkSplits, build_benchmark_splits, build_rollout_input
+from core.dotenv_bootstrap import load_project_dotenv
 from core.skill_artifact import EMPTY_SKILL_TEMPLATE
+
+
+def _json_default_rollout(obj: Any) -> Any:
+    """Serialize verifiers / Pydantic objects embedded in rollout state for JSONL."""
+    if isinstance(obj, BaseModel):
+        return obj.model_dump(mode="json")
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    if isinstance(obj, (set, frozenset)):
+        return list(obj)
+    raise TypeError(f"Object of type {type(obj).__name__!r} is not JSON serializable")
+
+
+def _dumps_rollout_line(record: dict[str, Any]) -> str:
+    return json.dumps(record, default=_json_default_rollout) + "\n"
 
 
 def default_output_dir(env_id: str, model: str, feedback_mode: str) -> Path:
@@ -52,6 +71,7 @@ def build_sequence_configs(
     benchmark_seed: int,
     system_prompt_override: str | None,
     judge_model: str,
+    max_examples: int | None = None,
 ) -> tuple[EnvironmentConfig, EnvironmentConfig]:
     carry_cfg = EnvironmentConfig(
         benchmark_split="carryover_sequences",
@@ -61,6 +81,7 @@ def build_sequence_configs(
         split_seed=benchmark_seed,
         system_prompt_override=system_prompt_override,
         judge_model=judge_model,
+        max_examples=max_examples,
     )
     transfer_cfg = EnvironmentConfig(
         benchmark_split="transfer_probe",
@@ -70,8 +91,22 @@ def build_sequence_configs(
         split_seed=benchmark_seed,
         system_prompt_override=system_prompt_override,
         judge_model=judge_model,
+        max_examples=max_examples,
     )
     return carry_cfg, transfer_cfg
+
+
+def slice_splits_for_max_examples(
+    splits: BenchmarkSplits, max_examples: int | None
+) -> tuple[list[list[AdvancedIFExample]], list[AdvancedIFExample]]:
+    """Limit carryover to the first sequence and first N tasks; transfer_probe to first N rows."""
+    if max_examples is None:
+        return splits.carryover_sequences, splits.transfer_probe
+    carry = splits.carryover_sequences[:1]
+    if carry:
+        carry = [carry[0][:max_examples]]
+    transfer = splits.transfer_probe[:max_examples]
+    return carry, transfer
 
 
 async def run_sequence_experiment(
@@ -84,6 +119,7 @@ async def run_sequence_experiment(
     output_dir: str | Path | None = None,
     benchmark_seed: int = 7,
     judge_model: str = DEFAULT_JUDGE_MODEL,
+    max_examples: int | None = 1,
     env_extra_kwargs: dict[str, Any] | None = None,
     system_prompt_strategy: str = "baseline",
 ) -> dict[str, Any]:
@@ -95,11 +131,13 @@ async def run_sequence_experiment(
         benchmark_seed=benchmark_seed,
         system_prompt_override=system_prompt_override,
         judge_model=judge_model,
+        max_examples=max_examples,
     )
 
     carry_env = vf.load_environment(env_id, config=carry_cfg, **env_kwargs)
     transfer_env = vf.load_environment(env_id, config=transfer_cfg, **env_kwargs)
     splits = build_benchmark_splits(carry_cfg)
+    carry_sequences, transfer_probe = slice_splits_for_max_examples(splits, max_examples)
 
     out_dir = (
         Path(output_dir)
@@ -111,7 +149,7 @@ async def run_sequence_experiment(
 
     record_count = 0
     with output_path.open("w", encoding="utf-8") as handle:
-        for sequence_id, sequence in enumerate(splits.carryover_sequences):
+        for sequence_id, sequence in enumerate(carry_sequences):
             current_skill = EMPTY_SKILL_TEMPLATE
             for task_index, example in enumerate(sequence):
                 result = await run_rollout(
@@ -132,10 +170,10 @@ async def run_sequence_experiment(
                     }
                 )
                 current_skill = str(result.get("current_skill_markdown") or current_skill)
-                handle.write(json.dumps(result) + "\n")
+                handle.write(_dumps_rollout_line(result))
                 record_count += 1
 
-            for example in splits.transfer_probe:
+            for example in transfer_probe:
                 for phase, skill_text in (
                     ("transfer_frozen", current_skill),
                     ("transfer_empty_control", EMPTY_SKILL_TEMPLATE),
@@ -157,7 +195,7 @@ async def run_sequence_experiment(
                             "system_prompt_strategy": system_prompt_strategy,
                         }
                     )
-                    handle.write(json.dumps(result) + "\n")
+                    handle.write(_dumps_rollout_line(result))
                     record_count += 1
 
     metadata = {
@@ -193,11 +231,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--benchmark-seed", type=int, default=7)
     parser.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
+    parser.add_argument(
+        "--max-examples",
+        type=int,
+        default=1,
+        help="First sequence only: at most this many carryover tasks and transfer probe rows; "
+        "use 0 or negative for no limit (full pilot splits).",
+    )
     return parser.parse_args()
 
 
 async def main_async() -> None:
     args = parse_args()
+    max_examples: int | None = None if args.max_examples <= 0 else args.max_examples
     result = await run_sequence_experiment(
         env_id=args.env,
         model=args.model,
@@ -208,11 +254,13 @@ async def main_async() -> None:
         output_dir=args.output_dir,
         benchmark_seed=args.benchmark_seed,
         judge_model=args.judge_model,
+        max_examples=max_examples,
     )
     print(json.dumps(result, indent=2))
 
 
 def main() -> None:
+    load_project_dotenv()
     asyncio.run(main_async())
 
 

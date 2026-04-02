@@ -108,6 +108,23 @@ That command creates a timestamped directory under `outputs/studies/` containing
 - `study_summary.json`
 - `report.md`
 
+### `run_study.py` execution flow
+
+End-to-end orchestration (configs → Prime eval → sequence runner → optional GEPA → report):
+
+```mermaid
+flowchart TD
+  A[Create study dir + TOML] --> B[prime eval: iterative main_eval]
+  B --> C[prime eval: RLM main_eval]
+  C --> D[Compare iter vs RLM]
+  D --> E[sequence_runner: carryover + transfer]
+  E --> F{skip_gepa?}
+  F -->|no| G[prime gepa run]
+  G --> H[prime eval: iterative + best prompt]
+  F -->|yes| I[study_summary.json + report.md]
+  H --> I
+```
+
 ## Research suite commands
 
 ### Independent evaluations
